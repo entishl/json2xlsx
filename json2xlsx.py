@@ -1,7 +1,8 @@
 import json
 import pandas as pd
 import os
-
+import sys
+import openpyxl
 # Define the 9 function types we are interested in for aggregation
 # This ensures consistent column order and handles cases where a character
 # might not have all types.
@@ -175,7 +176,13 @@ def convert_json_data_to_excel(data, output_excel_path):
 
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running in a PyInstaller bundle (frozen)
+        # sys.executable is the path to the exe
+        script_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as a normal Python script
+        script_dir = os.path.dirname(os.path.abspath(__file__))    
     input_folder = os.path.join(script_dir, "input")
     output_folder = os.path.join(script_dir, "output")
 
