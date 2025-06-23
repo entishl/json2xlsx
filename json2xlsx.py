@@ -19,10 +19,9 @@ AGGREGATED_FUNCTION_TYPES = [
 ]
 
 
-def convert_json_data_to_excel(data, output_excel_path):
+def process_character_equipment_stats(char_details, char_data, element_type, char_name):
     """
-    Converts the parsed JSON data (dictionary) into an Excel file
-    with multiple sheets, aggregating specific equipment stats.
+    Process equipment stats for a character and add aggregated stats to char_data.
     """
     # Map old English function types to new Chinese names
     OLD_FUNCTION_TYPE_NAMES = [
@@ -32,6 +31,64 @@ def convert_json_data_to_excel(data, output_excel_path):
     ]
     FUNCTION_TYPE_MAP = dict(zip(OLD_FUNCTION_TYPE_NAMES,
                                  AGGREGATED_FUNCTION_TYPES))
+    
+    # Initialize sums for aggregated stats
+    aggregated_stats = {func_type: 0.0 for func_type in AGGREGATED_FUNCTION_TYPES}  # noqa: E501
+    
+    equipments = char_details.get("equipments", {})
+    # Iterate through "0", "1", "2", "3" if they exist
+    for slot_key in equipments:
+        slot_data = equipments.get(slot_key, [])
+        for effect in slot_data:
+            func_type_from_json = effect.get("function_type")
+            # Keep as string initially for checking
+            func_value_str = effect.get("function_value")
+            
+            # Get the mapped Chinese name
+            mapped_func_type = FUNCTION_TYPE_MAP.get(
+                func_type_from_json
+            )
+            
+            if (mapped_func_type and
+                    mapped_func_type in aggregated_stats):
+                try:
+                    # Convert function_value to float for summation
+                    func_value_float = float(func_value_str)
+                    aggregated_stats[mapped_func_type] += \
+                        func_value_float
+                except (ValueError, TypeError):
+                    # pylint: disable=line-too-long
+                    part1 = "  Warning: Non-numeric or "
+                    part1_cont = "missing function_value "
+                    part2_val = f"'{func_value_str}' for "
+                    # Use original func_type_from_json for warning
+                    # if mapped_func_type is None
+                    part2_type_display = (func_type_from_json or
+                                          "Unknown Type")
+                    part2_type = (
+                        f"'{part2_type_display}' (mapped to "
+                        f"'{mapped_func_type}') in "
+                    )
+                    part3 = f"character '{char_name}', element "
+                    part4 = f"'{element_type}'. "
+                    part4_cont = "Skipping this effect value."
+                    warning_msg = (part1 + part1_cont +
+                                   part2_val + part2_type +
+                                   part3 + part4 + part4_cont)
+                    print(warning_msg)
+    
+    # Add aggregated stats to char_data
+    for func_type, total_value in aggregated_stats.items():
+        # Round to a reasonable number of decimal places
+        # if desired, e.g., 2
+        char_data[func_type] = round(total_value, 2)
+
+
+def convert_json_data_to_excel(data, output_excel_path):
+    """
+    Converts the parsed JSON data (dictionary) into an Excel file
+    with multiple sheets, aggregating specific equipment stats.
+    """
 
     try:
         # --- Sheet 1: 基本信息 (Combined with Cube Info) ---
@@ -43,9 +100,19 @@ def convert_json_data_to_excel(data, output_excel_path):
             "战术巨熊魔方": "N/A"
         }
         
-        for cube_name, details in data.get("cubes", {}).items():
-            if cube_name in target_cubes_levels:
-                target_cubes_levels[cube_name] = details.get("cube_level", "N/A")  # noqa: E501
+        cubes_data = data.get("cubes", [])
+        # Handle both old format (dict) and new format (list)
+        if isinstance(cubes_data, dict):
+            # Old format: cubes is a dict with cube names as keys
+            for cube_name, details in cubes_data.items():
+                if cube_name in target_cubes_levels:
+                    target_cubes_levels[cube_name] = details.get("cube_level", "N/A")  # noqa: E501
+        elif isinstance(cubes_data, list):
+            # New format: cubes is a list of objects
+            for cube in cubes_data:
+                cube_name = cube.get("name_cn", "")
+                if cube_name in target_cubes_levels:
+                    target_cubes_levels[cube_name] = cube.get("cube_level", "N/A")
         
         combined_basic_info_data = {
             "玩家": [player_name],
@@ -59,78 +126,49 @@ def convert_json_data_to_excel(data, output_excel_path):
         characters_list = []
         # pylint: disable=line-too-long
         for element_type, characters_in_element in data.get("elements", {}).items():  # noqa: E501
-            for char_name, char_details in characters_in_element.items():
-                char_data = {
-                    "元素类型": element_type,
-                    "角色": char_name,
-                    "Name Code": char_details.get("name_code", "N/A"),
-                    "ID": char_details.get("id", "N/A"),
-                    "Priority": char_details.get("priority", "N/A"),
-                    "技能1等级": char_details.get("skill1_level", "N/A"),
-                    "技能2等级": char_details.get("skill2_level", "N/A"),
-                    "爆裂技能等级": char_details.get("skill_burst_level", "N/A"),
-                    "收藏品稀有度": char_details.get("item_rare", "N/A"),
-                    "收藏品等级": char_details.get("item_level", "N/A"),
-                    "突破次数": char_details.get("limit_break", "N/A")
-                }
-                
-                # Initialize sums for aggregated stats
-                aggregated_stats = {func_type: 0.0 for func_type in AGGREGATED_FUNCTION_TYPES}  # noqa: E501
-                
-                equipments = char_details.get("equipments", {})
-                # Iterate through "0", "1", "2", "3" if they exist
-                for slot_key in equipments:
-                    slot_data = equipments.get(slot_key, [])
-                    for effect in slot_data:
-                        func_type_from_json = effect.get("function_type")
-                        # Keep as string initially for checking
-                        func_value_str = effect.get("function_value")
-                        
-                        # Get the mapped Chinese name
-                        mapped_func_type = FUNCTION_TYPE_MAP.get(
-                            func_type_from_json
-                        )
-                        
-                        if (mapped_func_type and
-                                mapped_func_type in aggregated_stats):
-                            try:
-                                # Convert function_value to float for summation
-                                func_value_float = float(func_value_str)
-                                aggregated_stats[mapped_func_type] += \
-                                    func_value_float
-                            except (ValueError, TypeError):
-                                # pylint: disable=line-too-long
-                                part1 = "  Warning: Non-numeric or "
-                                part1_cont = "missing function_value "
-                                part2_val = f"'{func_value_str}' for "
-                                # Use original func_type_from_json for warning
-                                # if mapped_func_type is None
-                                part2_type_display = (func_type_from_json or
-                                                      "Unknown Type")
-                                part2_type = (
-                                    f"'{part2_type_display}' (mapped to "
-                                    f"'{mapped_func_type}') in "
-                                )
-                                part3 = f"character '{char_name}', element "
-                                part4 = f"'{element_type}'. "
-                                part4_cont = "Skipping this effect value."
-                                warning_msg = (part1 + part1_cont +
-                                               part2_val + part2_type +
-                                               part3 + part4 + part4_cont)
-                                print(warning_msg)
-                        # Optional: Add a warning if func_type_from_json
-                        # is not in FUNCTION_TYPE_MAP
-                        # else:
-                        #     if func_type_from_json not in OLD_FUNCTION_TYPE_NAMES and func_type_from_json: # noqa E501
-                        #         print(f"  Info: Unmapped function_type '{func_type_from_json}' encountered for character '{char_name}'. Skipping.") # noqa E501
-                
-                # Add aggregated stats to char_data
-                for func_type, total_value in aggregated_stats.items():
-                    # Round to a reasonable number of decimal places
-                    # if desired, e.g., 2
-                    char_data[func_type] = round(total_value, 2)
+            # Handle both old format (dict) and new format (list)
+            if isinstance(characters_in_element, dict):
+                # Old format: characters_in_element is a dict with char names as keys
+                for char_name, char_details in characters_in_element.items():
+                    char_data = {
+                        "元素类型": element_type,
+                        "角色": char_name,
+                        "Name Code": char_details.get("name_code", "N/A"),
+                        "ID": char_details.get("id", "N/A"),
+                        "Priority": char_details.get("priority", "N/A"),
+                        "技能1等级": char_details.get("skill1_level", "N/A"),
+                        "技能2等级": char_details.get("skill2_level", "N/A"),
+                        "爆裂技能等级": char_details.get("skill_burst_level", "N/A"),
+                        "收藏品稀有度": char_details.get("item_rare", "N/A"),
+                        "收藏品等级": char_details.get("item_level", "N/A"),
+                        "突破次数": char_details.get("limit_break", "N/A")
+                    }
                     
-                characters_list.append(char_data)
+                    # Process equipment stats for old format
+                    process_character_equipment_stats(char_details, char_data, element_type, char_name)
+                    characters_list.append(char_data)
+                    
+            elif isinstance(characters_in_element, list):
+                # New format: characters_in_element is a list of character objects
+                for char_details in characters_in_element:
+                    char_name = char_details.get("name_cn", "N/A")
+                    char_data = {
+                        "元素类型": element_type,
+                        "角色": char_name,
+                        "Name Code": char_details.get("name_code", "N/A"),
+                        "ID": char_details.get("id", "N/A"),
+                        "Priority": char_details.get("priority", "N/A"),
+                        "技能1等级": char_details.get("skill1_level", "N/A"),
+                        "技能2等级": char_details.get("skill2_level", "N/A"),
+                        "爆裂技能等级": char_details.get("skill_burst_level", "N/A"),
+                        "收藏品稀有度": char_details.get("item_rare", "N/A"),
+                        "收藏品等级": char_details.get("item_level", "N/A"),
+                        "突破次数": char_details.get("limit_break", "N/A")
+                    }
+                    
+                    # Process equipment stats for new format
+                    process_character_equipment_stats(char_details, char_data, element_type, char_name)
+                    characters_list.append(char_data)
         
         df_characters = pd.DataFrame(characters_list) if characters_list else pd.DataFrame([{"元素类型": "无数据"}]) # noqa E501
         
